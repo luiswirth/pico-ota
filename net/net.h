@@ -22,6 +22,15 @@ typedef struct {
 // Call first: the watchdog bites a few seconds after the app starts.
 void net_init(void);
 
+// Flash the app owns, kept across app updates and power loss: NET_DATA_SIZE
+// bytes, read straight from NET_DATA.
+#define NET_DATA ((const uint8_t *)(0x10000000u + DATA_OFFSET))
+#define NET_DATA_SIZE (CONFIG_OFFSET - DATA_OFFSET)
+
+// Writes len bytes at offset into the data, erasing the 4 KiB sectors they
+// touch: offset must be a multiple of 4096. False if it doesn't fit.
+bool net_data_write(uint32_t offset, const void *data, uint32_t len);
+
 // Waits for the next request. Its fields stay valid until net_reply.
 bool net_wait(net_request *req, uint32_t timeout_ms);
 

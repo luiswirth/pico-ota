@@ -2,7 +2,8 @@
 //
 // 0x000000  bootloader, never written by itself
 // 0x07f000  app header: which app is in the slot, written last
-// 0x080000  app slot, linked there (see app.cmake)
+// 0x080000  app slot, linked there
+// 0x1c0000  data the app keeps, across app updates too
 // 0x1ff000  config: Wi-Fi and hostname, as text
 #pragma once
 
@@ -11,9 +12,8 @@
 #define FLASH_BASE 0x10000000u
 #define FLASH_SIZE (2u * 1024 * 1024)
 
-// HEADER_OFFSET, APP_OFFSET and CONFIG_OFFSET come from CMakeLists.txt,
-// which links by them.
-#define APP_MAX (CONFIG_OFFSET - APP_OFFSET)
+// The offsets come from layout.env, through pico_ota.cmake.
+#define APP_MAX (DATA_OFFSET - APP_OFFSET)
 
 #define APP_START (FLASH_BASE + APP_OFFSET)
 // The app keeps the usual layout: 256 bytes of boot2, then the vector table.

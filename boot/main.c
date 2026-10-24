@@ -120,7 +120,7 @@ static void flush_page(void) {
     flash_erase(HEADER_OFFSET, FLASH_SECTOR_SIZE);
   // Erase a whole 64 KiB block when entering it, which is faster than sectors.
   if (offset % 0x10000 == 0)
-    flash_erase(offset, MIN(0x10000u, CONFIG_OFFSET - offset));
+    flash_erase(offset, MIN(0x10000u, DATA_OFFSET - offset));
   flash_program(offset, page, sizeof page);
   written += page_fill;
   page_fill = 0;

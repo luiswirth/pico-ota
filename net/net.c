@@ -4,11 +4,13 @@
 #include <string.h>
 
 #include "config.h"
+#include "hardware/flash.h"
 #include "hardware/watchdog.h"
 #include "http.h"
 #include "layout.h"
 #include "link.h"
 #include "pico/cyw43_arch.h"
+#include "pico/flash.h"
 #include "pico/sync.h"
 
 #define TICK_MS 500
@@ -133,4 +135,29 @@ void net_reply(int status, const void *data, uint32_t length) {
     http_reply(app_conn, status, data, length);
   app_conn = NULL;
   cyw43_arch_lwip_end();
+}
+
+static uint8_t sector[FLASH_SECTOR_SIZE];
+static uint32_t sector_offset;
+
+static void write_sector(void *arg) {
+  flash_range_erase(sector_offset, FLASH_SECTOR_SIZE);
+  flash_range_program(sector_offset, sector, FLASH_SECTOR_SIZE);
+}
+
+bool net_data_write(uint32_t offset, const void *data, uint32_t len) {
+  if (offset % FLASH_SECTOR_SIZE || offset > NET_DATA_SIZE ||
+      len > NET_DATA_SIZE - offset)
+    return false;
+  const uint8_t *p = data;
+  for (uint32_t done = 0; done < len; done += FLASH_SECTOR_SIZE) {
+    uint32_t n = MIN(len - done, FLASH_SECTOR_SIZE);
+    // Through RAM, since data may itself be in flash.
+    memset(sector, 0xff, sizeof sector);
+    memcpy(sector, p + done, n);
+    sector_offset = DATA_OFFSET + offset + done;
+    if (flash_safe_execute(write_sector, NULL, 1000) != PICO_OK)
+      return false;
+  }
+  return true;
 }

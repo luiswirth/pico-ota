@@ -35,13 +35,11 @@ status)
     ;;
 config)
     [[ $# == 3 || $# == 4 ]] || die "usage: ota config <ssid> <password> <hostname> [country]"
-    env=$(dirname "$0")/../build/layout.env
-    [[ -f $env ]] || die "no $env, build first"
-    source "$env"
+    source "$(dirname "$0")/../common/layout.env"
     tmp=$(mktemp -d)
     printf 'ssid=%s\npassword=%s\nhostname=%s\ncountry=%s\n' "$1" "$2" "$3" "${4:-CH}" >"$tmp/config.bin"
     printf '\0' >>"$tmp/config.bin"
-    picotool load "$tmp/config.bin" -t bin -o "$CONFIG_ADDR" -f
+    picotool load "$tmp/config.bin" -t bin -o $((0x10000000 + CONFIG_OFFSET)) -f
     rm -r "$tmp"
     ;;
 *)
