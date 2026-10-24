@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Talks to a Pico running the bootloader or an app.
+#   ota flash <host> <app.bin>   puts a new app on it over Wi-Fi
+#   ota status <host>            what it runs
+#   ota config <ssid> <password> <hostname> [country]
+#                                writes the config over USB (picotool)
+# Anything else is plain HTTP, such as curl --data-binary @file http://<host>/<path>.
+set -euo pipefail
+
+die() { echo "ota: $*" >&2; exit 1; }
+
+cmd=${1:-}; shift || true
+case $cmd in
+flash)
+    [[ $# == 2 ]] || die "usage: ota flash <host> <app.bin>"
+    url=http://$1 bin=$2
+    [[ -f $bin ]] || die "no file $bin"
+    # An app restarts into the bootloader; the bootloader answers 404.
+    curl -s -m 5 -X POST "$url/bootloader" >/dev/null || true
+    end=$((SECONDS + 60))
+    until [[ $(curl -s -m 3 "$url/" | head -1) == bootloader ]]; do
+        ((SECONDS < end)) || die "no bootloader at $1"
+        sleep 1
+    done
+    if ! curl -sS --fail-with-body -m 120 -H 'Content-Type: application/octet-stream' \
+        --data-binary @"$bin" "$url/app"; then
+        # Back to the app the Pico had, if any.
+        curl -s -m 5 -X POST "$url/reboot" >/dev/null || true
+        exit 1
+    fi
+    ;;
+status)
+    [[ $# == 1 ]] || die "usage: ota status <host>"
+    curl -sS -m 5 "http://$1/"
+    ;;
+config)
+    [[ $# == 3 || $# == 4 ]] || die "usage: ota config <ssid> <password> <hostname> [country]"
+    env=$(dirname "$0")/../build/layout.env
+    [[ -f $env ]] || die "no $env, build first"
+    source "$env"
+    tmp=$(mktemp -d)
+    printf 'ssid=%s\npassword=%s\nhostname=%s\ncountry=%s\n' "$1" "$2" "$3" "${4:-CH}" >"$tmp/config.bin"
+    printf '\0' >>"$tmp/config.bin"
+    picotool load "$tmp/config.bin" -t bin -o "$CONFIG_ADDR" -f
+    rm -r "$tmp"
+    ;;
+*)
+    sed -n '2,7s/^# \{0,1\}//p' "$0"
+    exit 1
+    ;;
+esac
