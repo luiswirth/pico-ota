@@ -229,14 +229,14 @@ static void on_end(http_conn *c) {
   reboot_at = make_timeout_time_ms(200);
 }
 
-static void on_gone(http_conn *c) {
+static void on_done(http_conn *c) {
   if (c == upload) {
     printf("boot: upload broke off at %lu bytes\n", (unsigned long)written);
     upload = NULL;
   }
 }
 
-static const http_handler handler = {on_begin, on_body, on_end, on_gone};
+static const http_handler handler = {on_begin, on_body, on_end, on_done};
 
 int main(void) {
   uint32_t reason = watchdog_hw->scratch[BOOT_REASON_SCRATCH];

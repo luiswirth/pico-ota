@@ -34,5 +34,6 @@ bool net_data_write(uint32_t offset, const void *data, uint32_t len);
 // Waits for the next request. Its fields stay valid until net_reply.
 bool net_wait(net_request *req, uint32_t timeout_ms);
 
-// Answers the request net_wait returned.
+// Answers the request net_wait returned, with a body of any length. Returns
+// once it is sent, or the client is gone.
 void net_reply(int status, const void *body, uint32_t length);

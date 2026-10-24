@@ -17,11 +17,14 @@ typedef struct {
   int (*body)(http_conn *c, const uint8_t *data, uint32_t len);
   // The body is complete. The handler answers with http_reply, now or later.
   void (*end)(http_conn *c);
-  // The client went away before the body was complete.
-  void (*gone)(http_conn *c);
+  // The connection is over: the reply is out, or the client went away.
+  // Called once for each connection begin saw; c is not used again.
+  void (*done)(http_conn *c);
 } http_handler;
 
 void http_start(uint16_t port, const http_handler *h);
 
-// Answers and closes. Also fine after the client went away.
-void http_reply(http_conn *c, int status, const char *body, uint32_t len);
+// Answers and closes, at most once per connection and not after done.
+// The body goes out as the client takes it, so it has to stay valid until
+// done, unless it fits the send buffer (TCP_SND_BUF) and is copied at once.
+void http_reply(http_conn *c, int status, const void *body, uint32_t len);

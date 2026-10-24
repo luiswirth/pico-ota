@@ -20,9 +20,12 @@ static bool online;
 static bool to_bootloader;
 static async_at_time_worker_t ticker;
 
-// The app's request, from begin until net_reply. Touched under the lwIP lock.
+// The app's request, from begin until net_reply returns, so that the next one
+// waits (503). Touched under the lwIP lock.
 static http_conn *app_conn;
-static bool app_ready;
+static bool app_ready; // its body is in, for net_wait to give
+static bool app_has;   // its body is in, so the app answers it
+static bool app_over;  // its connection is done, while the app has it
 static char method[8], path[128];
 static uint8_t body[NET_BODY_MAX];
 static uint32_t fill;
@@ -61,6 +64,7 @@ static int on_begin(http_conn *c, const char *m, const char *p,
   strcpy(method, m);
   strcpy(path, p);
   app_conn = c;
+  app_has = app_over = false;
   fill = 0;
   pending = REQ_APP;
   return 0;
@@ -76,7 +80,7 @@ static int on_body(http_conn *c, const uint8_t *data, uint32_t len) {
 
 static void on_end(http_conn *c) {
   if (c == app_conn) {
-    app_ready = true;
+    app_ready = app_has = true;
     sem_release(&ready);
     return;
   }
@@ -84,12 +88,16 @@ static void on_end(http_conn *c) {
   to_bootloader = true;
 }
 
-static void on_gone(http_conn *c) {
-  if (c == app_conn)
+static void on_done(http_conn *c) {
+  if (c != app_conn)
+    return;
+  if (app_has)
+    app_over = true;
+  else
     app_conn = NULL;
 }
 
-static const http_handler handler = {on_begin, on_body, on_end, on_gone};
+static const http_handler handler = {on_begin, on_body, on_end, on_done};
 
 void net_init(void) {
   // Again, since watchdog_update reloads the time this binary set, not the
@@ -131,9 +139,22 @@ bool net_wait(net_request *req, uint32_t timeout_ms) {
 
 void net_reply(int status, const void *data, uint32_t length) {
   cyw43_arch_lwip_begin();
-  if (app_conn)
+  if (!app_has) {
+    cyw43_arch_lwip_end();
+    return;
+  }
+  if (!app_over)
     http_reply(app_conn, status, data, length);
+  cyw43_arch_lwip_end();
+  // The reply goes out from data, as the client takes it.
+  for (bool over = false; !over; sleep_ms(1)) {
+    cyw43_arch_lwip_begin();
+    over = app_over;
+    cyw43_arch_lwip_end();
+  }
+  cyw43_arch_lwip_begin();
   app_conn = NULL;
+  app_has = false;
   cyw43_arch_lwip_end();
 }
 

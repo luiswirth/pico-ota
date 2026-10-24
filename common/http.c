@@ -11,7 +11,7 @@
 #define HEAD_MAX 1024
 #define IDLE_POLLS 40 // of 0.5 s
 
-enum state { FREE, HEAD, BODY, WAIT, DONE };
+enum state { FREE, HEAD, BODY, WAIT, SEND };
 
 struct http_conn {
   struct tcp_pcb *pcb; // NULL once lwIP is done with it
@@ -19,6 +19,9 @@ struct http_conn {
   uint8_t idle;
   uint16_t head_len;
   uint32_t remaining;
+  bool begun;         // the handler's begin saw it, so its done will
+  const uint8_t *out; // the rest of the reply body, in SEND
+  uint32_t out_left;
   char head[HEAD_MAX];
 };
 
@@ -56,11 +59,11 @@ static const char *reason(int status) {
   }
 }
 
-// Frees a connection that ends without a reply.
-static void drop(http_conn *c) {
-  if (c->state == BODY)
-    handler->gone(c);
+// Frees a connection, and tells the handler if it took it.
+static void finish(http_conn *c) {
   c->state = FREE;
+  if (c->begun)
+    handler->done(c);
 }
 
 // Lets go of the pcb. Returns true if it had to be aborted.
@@ -72,6 +75,7 @@ static bool detach(http_conn *c) {
   tcp_arg(pcb, NULL);
   tcp_recv(pcb, NULL);
   tcp_err(pcb, NULL);
+  tcp_sent(pcb, NULL);
   tcp_poll(pcb, NULL, 0);
   if (tcp_close(pcb) != ERR_OK) {
     tcp_abort(pcb);
@@ -81,21 +85,36 @@ static bool detach(http_conn *c) {
   return false;
 }
 
-void http_reply(http_conn *c, int status, const char *body, uint32_t len) {
-  if (c->pcb) {
-    char head[128];
-    int n = snprintf(
-        head, sizeof head,
-        "HTTP/1.1 %d %s\r\nContent-Length: %lu\r\nConnection: close\r\n\r\n",
-        status, reason(status), (unsigned long)len);
-    tcp_write(c->pcb, head, n,
-              TCP_WRITE_FLAG_COPY | (len ? TCP_WRITE_FLAG_MORE : 0));
-    if (len)
-      tcp_write(c->pcb, body, len, TCP_WRITE_FLAG_COPY);
-    tcp_output(c->pcb);
-    detach(c);
+// Hands TCP as much of the body as its send buffer takes, and closes once
+// all of it is in. Called again as the client acknowledges.
+static void send_more(http_conn *c) {
+  while (c->out_left) {
+    uint32_t n = LWIP_MIN(c->out_left, tcp_sndbuf(c->pcb));
+    if (!n || tcp_write(c->pcb, c->out, n, TCP_WRITE_FLAG_COPY) != ERR_OK)
+      break;
+    c->out += n;
+    c->out_left -= n;
   }
-  c->state = FREE;
+  tcp_output(c->pcb);
+  if (!c->out_left) {
+    detach(c);
+    finish(c);
+  }
+}
+
+void http_reply(http_conn *c, int status, const void *body, uint32_t len) {
+  char head[128];
+  int n = snprintf(
+      head, sizeof head,
+      "HTTP/1.1 %d %s\r\nContent-Length: %lu\r\nConnection: close\r\n\r\n",
+      status, reason(status), (unsigned long)len);
+  tcp_write(c->pcb, head, n,
+            TCP_WRITE_FLAG_COPY | (len ? TCP_WRITE_FLAG_MORE : 0));
+  c->state = SEND;
+  c->idle = 0;
+  c->out = body;
+  c->out_left = len;
+  send_more(c);
 }
 
 static void reply_status(http_conn *c, int status) {
@@ -135,6 +154,7 @@ static int parse_head(http_conn *c) {
 
   c->remaining = (uint32_t)length;
   c->state = BODY;
+  c->begun = true;
   int status = handler->begin(c, method, path, c->remaining);
   if (status)
     return status;
@@ -187,9 +207,9 @@ static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p,
   http_conn *c = arg;
   if (!p) {
     // The client closed its side. A pending reply can still go out.
-    if (c->state != WAIT) {
+    if (c->state != WAIT && c->state != SEND) {
       bool aborted = detach(c);
-      drop(c);
+      finish(c);
       return aborted ? ERR_ABRT : ERR_OK;
     }
     return ERR_OK;
@@ -206,18 +226,28 @@ static err_t on_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p,
 static void on_err(void *arg, err_t err) {
   http_conn *c = arg;
   c->pcb = NULL; // lwIP has freed it
-  if (c->state != WAIT)
-    drop(c);
+  finish(c);
+}
+
+static err_t on_sent(void *arg, struct tcp_pcb *pcb, u16_t len) {
+  http_conn *c = arg;
+  c->idle = 0;
+  aborted = false;
+  if (c->state == SEND)
+    send_more(c);
+  return aborted ? ERR_ABRT : ERR_OK;
 }
 
 static err_t on_poll(void *arg, struct tcp_pcb *pcb) {
   http_conn *c = arg;
+  aborted = false;
   if (c->state != WAIT && ++c->idle > IDLE_POLLS) {
-    bool aborted = detach(c);
-    drop(c);
-    return aborted ? ERR_ABRT : ERR_OK;
+    detach(c);
+    finish(c);
+  } else if (c->state == SEND) {
+    send_more(c); // after a write that found no memory
   }
-  return ERR_OK;
+  return aborted ? ERR_ABRT : ERR_OK;
 }
 
 static err_t on_accept(void *arg, struct tcp_pcb *pcb, err_t err) {
@@ -237,6 +267,7 @@ static err_t on_accept(void *arg, struct tcp_pcb *pcb, err_t err) {
   tcp_arg(pcb, c);
   tcp_recv(pcb, on_recv);
   tcp_err(pcb, on_err);
+  tcp_sent(pcb, on_sent);
   tcp_poll(pcb, on_poll, 1);
   return ERR_OK;
 }
