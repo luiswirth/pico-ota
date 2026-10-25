@@ -3,8 +3,8 @@
 A Wi-Fi bootloader and app runtime for the Raspberry Pi Pico W, on the Pico SDK.
 
 - `boot/` is the bootloader, `net/` the runtime every app links, `common/` what both share.
-- `common/layout.h` holds the flash layout and the hand-over between bootloader and app.
-- An app is a CMake target passed to `ota_app`; `examples/` has some.
+- `common/layout.env` sets the flash layout, `common/layout.h` says what each part is for and holds the hand-over between bootloader and app.
+- An app is a CMake target passed to `ota_app` from `pico_ota.cmake`, which an app's own repository includes; `examples/` has some.
 - `tools/ota` flashes an app over Wi-Fi and writes the config over USB; the `justfile` wraps it.
 
 ## Invariants
