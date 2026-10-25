@@ -17,5 +17,4 @@ pico_enable_stdio_uart(boot 0)
 ota_flash_region(boot 0x10000000 ${OTA_HEADER_OFFSET})
 pico_add_extra_outputs(boot)
 
-add_subdirectory(examples/blink)
 add_subdirectory(examples/hang)

@@ -14,11 +14,24 @@
 #include "pico/sync.h"
 
 #define TICK_MS 500
+// The LED says how the app is: a short flash every 2 s without Wi-Fi, and
+// a shorter one every 20 s with it, to show power in a dark room.
+#define OFFLINE_TICKS 4
+#define OFFLINE_FLASH_MS 60
+#define ONLINE_TICKS 40
+#define ONLINE_FLASH_MS 20
 
 static config cfg;
 static bool online;
 static bool to_bootloader;
 static async_at_time_worker_t ticker;
+static bool was_up;
+static int beat;
+static async_at_time_worker_t flash_end;
+
+static void end_flash(async_context_t *ctx, async_at_time_worker_t *w) {
+  cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
+}
 
 // The app's request, from begin until net_reply returns, so that the next one
 // waits (503). Touched under the lwIP lock.
@@ -41,6 +54,15 @@ static void tick(async_context_t *ctx, async_at_time_worker_t *w) {
   }
   if (online)
     link_tick();
+  bool up = online && link_up();
+  if (up != was_up)
+    beat = 0; // a change shows at once
+  was_up = up;
+  if (beat++ % (up ? ONLINE_TICKS : OFFLINE_TICKS) == 0) {
+    cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, true);
+    async_context_add_at_time_worker_in_ms(
+        ctx, &flash_end, up ? ONLINE_FLASH_MS : OFFLINE_FLASH_MS);
+  }
   async_context_add_at_time_worker_in_ms(ctx, w, TICK_MS);
 }
 
@@ -120,6 +142,7 @@ void net_init(void) {
     printf("net: no config, staying offline\n");
   }
   ticker.do_work = tick;
+  flash_end.do_work = end_flash;
   async_context_add_at_time_worker_in_ms(cyw43_arch_async_context(), &ticker,
                                          0);
 }

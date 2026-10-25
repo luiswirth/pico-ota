@@ -1,5 +1,6 @@
 // The runtime every app links. It keeps the Pico on Wi-Fi as <hostname>.local,
 // answers HTTP on port 80, and feeds the watchdog the bootloader armed.
+// The LED is the runtime's, to show how the Pico is: apps leave it alone.
 // POST /bootloader restarts into the bootloader, to take a new app.
 // Every other request goes to the app, one at a time, through net_wait.
 #pragma once

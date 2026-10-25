@@ -13,4 +13,6 @@ A Wi-Fi bootloader and app runtime for the Raspberry Pi Pico W, on the Pico SDK.
   It goes on over USB only.
 - Every app links the runtime:
   The bootloader arms the watchdog before it starts an app, and the runtime feeds it.
+- The LED shows how the Pico is, and is never the app's:
+  The bootloader blinks it fast, and the runtime flashes it every 2 s without Wi-Fi and briefly every 20 s with it, so that it is near dark in a dark room.
 - The Wi-Fi config lives on the device, in its own flash sector, never in a build.
